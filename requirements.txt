@@ -1,4 +1,6 @@
-fastapi==0.87.0
-matplotlib==3.5.1
-numpy==1.13.3
-scipy==1.8.0
+fastapi
+matplotlib
+numpy
+scipy
+uvicorn[standard]
+opencv-python-4.6.0.66
