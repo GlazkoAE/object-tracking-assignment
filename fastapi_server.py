@@ -1,14 +1,14 @@
 import asyncio
 import glob
+from collections import Counter
 
 import numpy as np
 from fastapi import FastAPI, WebSocket
 
 from soft_tracker.sort import Sort
-from track_5_noise import country_balls_amount, track_data
+from track_5 import country_balls_amount, track_data
 
 # TODO: Metrics calculation
-
 
 app = FastAPI(title="Tracker assignment")
 imgs = glob.glob("imgs/*")
@@ -75,6 +75,29 @@ def tracker_strong(el):
     return el
 
 
+def get_metric(track_ids: dict):
+    metrics_list = []
+
+    for _, val in track_ids.items():
+        if len(val) == 0:
+            metrics_list.append(0)
+        else:
+            track_id = Counter(val).most_common(1)[0]
+            if track_id[0] is None:
+                track_id = Counter(val).most_common(2)[1]
+            metrics_list.append(track_id[1] / len(val))
+    metric = sum(metrics_list) / len(metrics_list)
+    return metric
+
+
+def update_track_ids(el: dict, track_ids: dict):
+    for obj in el["data"]:
+        cb_id = obj["cb_id"]
+        track_id = obj["track_id"]
+        track_ids[cb_id].append(track_id)
+    return track_ids
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     print("Accepting client connection...")
@@ -82,11 +105,19 @@ async def websocket_endpoint(websocket: WebSocket):
     # отправка служебной информации для инициализации объектов
     # класса CountryBall на фронте
     await websocket.send_text(str(country_balls))
+    track_ids_soft = {i: [] for i in range(country_balls_amount)}
+    track_ids_strong = {i: [] for i in range(country_balls_amount)}
     for el in track_data:
         await asyncio.sleep(0.5)
-        el = tracker_soft(el)
+        el_soft = tracker_soft(el)
+        track_ids_soft = update_track_ids(el_soft, track_ids_soft)
         # TODO: part 2
-        # el = tracker_strong(el)
+        # el_strong = tracker_strong(el)
+        # track_ids_strong = update_track_ids(el_strong, track_ids_strong)
         # отправка информации по фрейму
-        await websocket.send_json(el)
+        await websocket.send_json(el_soft)
+    metric_soft = get_metric(track_ids_soft)
+    metric_strong = get_metric(track_ids_strong)
+    print(f"metric_soft: {metric_soft}")
+    print(f"metric_strong: {metric_strong}")
     print("Bye..")
