@@ -1,6 +1,7 @@
-fastapi
-matplotlib
-numpy
-scipy
-uvicorn[standard]
-opencv-python-4.6.0.66
+fastapi~=0.88.0
+matplotlib~=3.6.2
+numpy~=1.23.5
+scipy~=1.9.3
+opencv-python~=4.6.0.66
+torch~=1.13.0
+torchvision~=0.14.0

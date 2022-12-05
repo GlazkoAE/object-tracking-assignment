@@ -1,0 +1,78 @@
+import numpy as np
+
+from .features import FeatureTracker
+from .kalman import KalmanTracker
+from .utils import compare_boxes_deep
+from .feature_extractor import extract_features
+
+
+class DeepSort:
+    def __init__(self, max_age=10, hit_sum=1, thresh=0.3, coeff=0.5):
+        # max_age: no of consecutive frames in which tracker can exist without an associated box
+        self.max_age = max_age
+        # no of consecutive frames a tracker is associated with a detection so that we consider
+        # it as an object
+        self.hit_sum = hit_sum
+        self.trackers = []
+        self.features = []
+        self.thresh = thresh
+        self.coeff = coeff
+        self.count = 0
+
+    def next_id(self):
+        self.count += 1
+        return self.count
+
+    def update(self, dets, img):
+
+        det_features = []
+        for det in dets:
+            det_features.append(extract_features(img, det))
+
+        self.trackers = [
+            tracker
+            for tracker in self.trackers
+            if not np.any(np.isnan(tracker.predict()))
+        ]
+
+        trks = np.array([tracker.current_state for tracker in self.trackers])
+        ftrs = np.array([feature.current_state for feature in self.features])
+
+        # Then we associate detections with tracker boxes
+        matched, unmatched_dets, unmatched_tracks = compare_boxes_deep(detections=dets,
+                                                                       trackers=trks,
+                                                                       det_features=det_features,
+                                                                       trk_features=ftrs,
+                                                                       thresh=self.thresh,
+                                                                       coeff=self.coeff,
+                                                                       )
+
+        # Then we will update the kalman filter with measurements
+        # for each detection we maintain separate filter
+        for detection_num, tracker_num in matched:
+            self.trackers[tracker_num].update(dets[detection_num])
+            self.features[tracker_num].update(img, dets[detection_num])
+
+        # For all unmatched detections we will create new tracking in Kalman.
+        # it means new object comes to the frame
+        for i in unmatched_dets:
+            self.trackers.append(KalmanTracker(dets[i, :], self.next_id()))
+            self.features.append(FeatureTracker(img, dets[i, :], self.next_id()))
+
+        # we are taking only those trackers which is updated and predicted at least self.hit_sum
+        out = np.array(
+            [
+                np.concatenate((trk.current_state, [trk.id]))
+                for trk in self.trackers
+                if trk.time_since_last_update == 0 and trk.no_of_updates >= self.hit_sum
+            ]
+        )
+
+        # we are deleting those trackers which remains in frame for long and not updating
+        self.trackers = [
+            tracker
+            for tracker in self.trackers
+            if tracker.time_since_last_update <= self.max_age
+        ]
+
+        return out

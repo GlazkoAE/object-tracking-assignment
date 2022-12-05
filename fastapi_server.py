@@ -1,21 +1,26 @@
 import asyncio
 import glob
+import os
 from collections import Counter
 
+import cv2
 import numpy as np
 from fastapi import FastAPI, WebSocket
 
-from soft_tracker.sort import Sort
+from tracker.sort import Sort
+from tracker.deepsort import DeepSort
 from track_5 import country_balls_amount, track_data
 
-# TODO: Metrics calculation
+# TODO: add image reading
 
+track_name = "track_5"
 app = FastAPI(title="Tracker assignment")
 imgs = glob.glob("imgs/*")
 country_balls = [
     {"cb_id": x, "img": imgs[x % len(imgs)]} for x in range(country_balls_amount)
 ]
-tracker = Sort(max_age=10, hit_sum=1)
+sort_tracker = Sort(max_age=10, hit_sum=1)
+deepsort_tracker = DeepSort(max_age=10, hit_sum=1, thresh=0.3, coeff=0.5)
 print("Started")
 
 
@@ -44,14 +49,14 @@ def tracker_soft(el):
             detections = np.concatenate((detections, bbox), axis=0)
 
     detections = detections[1:, :]
-    out = tracker.update(detections)
+    out = sort_tracker.update(detections)
     for i in range(len(out)):
         el["data"][i]["track_id"] = out[i][-1]
 
     return el
 
 
-def tracker_strong(el):
+def tracker_strong(el, img):
     """
     Необходимо изменить у каждого словаря в списке значение поля 'track_id' так,
     чтобы как можно более длительный период времени 'track_id' соответствовал
@@ -72,6 +77,19 @@ def tracker_strong(el):
     и по координатам вырезать необходимые регионы.
     TODO: Ужасный костыль, на следующий поток поправить
     """
+    detections = np.empty((1, 4), dtype=int)
+    for obj in el["data"]:
+        bbox = obj["bounding_box"]
+        if len(bbox) > 0:
+            bbox = np.array(bbox)
+            bbox = np.reshape(bbox, (1, 4))
+            detections = np.concatenate((detections, bbox), axis=0)
+    detections = detections[1:, :]
+
+    out = deepsort_tracker.update(detections, img)
+    for i in range(len(out)):
+        el["data"][i]["track_id"] = out[i][-1]
+
     return el
 
 
@@ -112,10 +130,13 @@ async def websocket_endpoint(websocket: WebSocket):
         el_soft = tracker_soft(el)
         track_ids_soft = update_track_ids(el_soft, track_ids_soft)
         # TODO: part 2
-        # el_strong = tracker_strong(el)
-        # track_ids_strong = update_track_ids(el_strong, track_ids_strong)
+        idx = el["frame_id"]
+        image_path = os.path.join(os.getcwd(), 'tracks_img', track_name, str(idx) + '.png')
+        img = cv2.imread(image_path)
+        el_strong = tracker_strong(el, img)
+        track_ids_strong = update_track_ids(el_strong, track_ids_strong)
         # отправка информации по фрейму
-        await websocket.send_json(el_soft)
+        await websocket.send_json(el_strong)
     metric_soft = get_metric(track_ids_soft)
     metric_strong = get_metric(track_ids_strong)
     print(f"metric_soft: {metric_soft}")
